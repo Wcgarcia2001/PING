@@ -8,84 +8,34 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// MÉTODO 1: Ping nativo de Android (sin root)
-function pingAndroid(ip, timeout = 3000) {
-  return new Promise((resolve) => {
-    // Android usa ping estilo Linux
-    // -c: count, -W: timeout en segundos, -w: deadline
-    const timeoutSec = Math.ceil(timeout / 1000);
-    const command = `ping -c 3 -W ${timeoutSec} ${ip}`;
-    
-    const startTime = Date.now();
-    
-    exec(command, { timeout: timeout + 1000 }, (error, stdout, stderr) => {
-      const elapsed = Date.now() - startTime;
-      
-      // Verificar si hubo respuesta
-      const hasResponse = stdout.includes('bytes from') || 
-                         stdout.includes('ttl=') ||
-                         stdout.includes('time=');
-      
-      // Extraer tiempo promedio
-      let avgTime = 0;
-      
-      // Buscar línea de estadísticas: "rtt min/avg/max/mdev = X/Y/Z/W ms"
-      const statsMatch = stdout.match(/rtt min\/avg\/max\/mdev = [\d.]+\/([\d.]+)\//);
-      if (statsMatch) {
-        avgTime = Math.round(parseFloat(statsMatch[1]));
-      } else {
-        // Buscar tiempos individuales
-        const timeMatches = stdout.match(/time=([\d.]+) ms/g);
-        if (timeMatches && timeMatches.length > 0) {
-          const times = timeMatches.map(m => parseFloat(m.match(/time=([\d.]+)/)[1]));
-          avgTime = Math.round(times.reduce((a, b) => a + b, 0) / times.length);
-        }
-      }
-      
-      // Si no hay respuesta pero tardó mucho, es timeout
-      if (!hasResponse && elapsed >= timeout) {
-        resolve({ alive: false, time: 0, method: 'ping-timeout' });
-        return;
-      }
-      
-      resolve({ 
-        alive: hasResponse, 
-        time: avgTime || (hasResponse ? elapsed : 0),
-        method: 'ping'
-      });
-    });
-  });
-}
+// Bandera global para saber si ping está disponible
+let pingAvailable = true;
 
-// MÉTODO 2: TCP Socket (funciona sin permisos)
+// Verificar si ping funciona al iniciar
+exec('ping -c 1 8.8.8.8', (error) => {
+  if (error) {
+    console.warn('⚠️ Advertencia: ping no está disponible en este dispositivo. Usando solo TCP/UDP.');
+    pingAvailable = false;
+  } else {
+    console.log('✅ Ping disponible en el sistema.');
+  }
+});
+
+// TCP Check (sin ping)
 function checkTCP(ip, port = 80, timeout = 2000) {
   return new Promise((resolve) => {
     const startTime = Date.now();
     const socket = new net.Socket();
-    
     socket.setTimeout(timeout);
-    
-    const cleanup = () => {
-      try {
-        socket.destroy();
-      } catch (e) {}
-    };
+    const cleanup = () => { try { socket.destroy(); } catch (e) {} };
     
     socket.on('connect', () => {
       const time = Date.now() - startTime;
       cleanup();
       resolve({ alive: true, time, method: 'tcp', port });
     });
-    
-    socket.on('timeout', () => {
-      cleanup();
-      resolve({ alive: false, time: 0, method: 'tcp-timeout', port });
-    });
-    
-    socket.on('error', (err) => {
-      cleanup();
-      resolve({ alive: false, time: 0, method: 'tcp-error', port });
-    });
+    socket.on('timeout', () => { cleanup(); resolve({ alive: false, time: 0, method: 'tcp-timeout', port }); });
+    socket.on('error', () => { cleanup(); resolve({ alive: false, time: 0, method: 'tcp-error', port }); });
     
     try {
       socket.connect(port, ip);
@@ -96,13 +46,12 @@ function checkTCP(ip, port = 80, timeout = 2000) {
   });
 }
 
-// MÉTODO 3: UDP Echo (alternativa)
+// UDP Check
 function checkUDP(ip, timeout = 2000) {
   return new Promise((resolve) => {
     const socket = dgram.createSocket('udp4');
     const startTime = Date.now();
     let responded = false;
-    
     const timer = setTimeout(() => {
       if (!responded) {
         socket.close();
@@ -118,7 +67,6 @@ function checkUDP(ip, timeout = 2000) {
         resolve({ alive: true, time: Date.now() - startTime, method: 'udp' });
       }
     });
-    
     socket.on('error', () => {
       if (!responded) {
         responded = true;
@@ -127,178 +75,129 @@ function checkUDP(ip, timeout = 2000) {
         resolve({ alive: false, time: 0, method: 'udp-error' });
       }
     });
-    
-    // Enviar paquete UDP al puerto 7 (echo) o 53 (DNS)
     socket.send(Buffer.from([0x00]), 53, ip);
   });
 }
 
-// MÉTODO HÍBRIDO: Intenta múltiples métodos
+// Método híbrido SIN ping (solo TCP/UDP)
 async function checkIPHybrid(ip, timeout = 3000) {
-  // 1. Intentar ping primero (más confiable)
-  try {
-    const pingResult = await pingAndroid(ip, timeout);
-    if (pingResult.alive) {
-      return pingResult;
-    }
-  } catch (error) {
-    console.log(`Ping falló para ${ip}: ${error.message}`);
-  }
-  
-  // 2. Si ping falla, intentar TCP en puertos comunes
-  const commonPorts = [80, 443, 22, 8080, 3389, 21, 23];
-  
-  for (const port of commonPorts) {
+  if (pingAvailable) {
+    // Intentar ping solo si está disponible
     try {
-      const tcpResult = await checkTCP(ip, port, 1500);
-      if (tcpResult.alive) {
-        return tcpResult;
+      const timeoutSec = Math.ceil(timeout / 1000);
+      const command = `ping -c 2 -W ${timeoutSec} ${ip}`;
+      const startTime = Date.now();
+      const { stdout } = await new Promise((resolve, reject) => {
+        exec(command, { timeout: timeout + 1000 }, (error, stdout, stderr) => {
+          if (error && error.killed) {
+            reject(new Error('ping timeout'));
+          } else {
+            resolve({ stdout, error });
+          }
+        });
+      });
+      const hasResponse = stdout.includes('bytes from') || stdout.includes('ttl=');
+      const elapsed = Date.now() - startTime;
+      if (hasResponse) {
+        return { alive: true, time: elapsed, method: 'ping' };
       }
     } catch (error) {
-      continue;
+      console.log(`Ping falló para ${ip}, intentando TCP...`);
     }
   }
-  
-  // 3. Último intento con UDP
+
+  // Fallback a TCP
+  const commonPorts = [80, 443, 22, 8080];
+  for (const port of commonPorts) {
+    try {
+      const result = await checkTCP(ip, port, 1000);
+      if (result.alive) return result;
+    } catch (e) {}
+  }
+
+  // Último intento con UDP
   try {
-    const udpResult = await checkUDP(ip, 1500);
-    if (udpResult.alive) {
-      return udpResult;
-    }
-  } catch (error) {
-    // Ignorar
-  }
-  
+    const udpResult = await checkUDP(ip, 1000);
+    if (udpResult.alive) return udpResult;
+  } catch (e) {}
+
   return { alive: false, time: 0, method: 'all-failed' };
 }
 
-// Endpoint para verificar una sola IP
+// Endpoints
 app.post('/api/check-ip', async (req, res) => {
   const { ip } = req.body;
-  
-  if (!ip) {
-    return res.status(400).json({ error: 'IP requerida' });
-  }
-  
+  if (!ip) return res.status(400).json({ error: 'IP requerida' });
   try {
-    const result = await checkIPHybrid(ip, 4000);
-    
+    const result = await checkIPHybrid(ip, 3000);
     res.json({
-      ip: ip,
+      ip,
       status: result.alive ? 'online' : 'offline',
       time: result.time,
-      method: result.method,
-      port: result.port
+      method: result.method
     });
   } catch (error) {
-    res.json({ 
-      ip: ip, 
-      status: 'timeout', 
-      time: 0,
-      error: error.message 
-    });
+    res.json({ ip, status: 'timeout', time: 0 });
   }
 });
 
-// Endpoint para verificar múltiples IPs
 app.post('/api/check-multiple', async (req, res) => {
   const { ips } = req.body;
-  
   if (!ips || !Array.isArray(ips)) {
     return res.status(400).json({ error: 'Array de IPs requerido' });
   }
-  
   console.log(`📡 Verificando ${ips.length} IPs...`);
-  
-  try {
-    // Procesar en lotes pequeños para no saturar
-    const batchSize = 5;
-    const results = [];
-    
-    for (let i = 0; i < ips.length; i += batchSize) {
-      const batch = ips.slice(i, i + batchSize);
-      console.log(`Procesando lote ${Math.floor(i/batchSize) + 1}/${Math.ceil(ips.length/batchSize)}...`);
-      
-      const batchResults = await Promise.all(
-        batch.map(async (entry) => {
-          try {
-            const result = await checkIPHybrid(entry.ip, 3000);
-            
-            console.log(`  ${entry.ip}: ${result.alive ? '✅' : '❌'} (${result.method})`);
-            
-            return {
-              ...entry,
-              status: result.alive ? 'online' : 'offline',
-              time: result.time,
-              method: result.method
-            };
-          } catch (error) {
-            console.log(`  ${entry.ip}: ❌ Error`);
-            return {
-              ...entry,
-              status: 'timeout',
-              time: 0,
-              method: 'error'
-            };
-          }
-        })
-      );
-      
-      results.push(...batchResults);
-    }
-    
-    console.log(`✅ Verificación completa: ${results.filter(r => r.status === 'online').length}/${results.length} online`);
-    res.json(results);
-    
-  } catch (error) {
-    console.error('❌ Error en verificación:', error);
-    res.status(500).json({ error: error.message });
+  const results = [];
+  const batchSize = 2; // Ajustado para móviles
+  for (let i = 0; i < ips.length; i += batchSize) {
+    const batch = ips.slice(i, i + batchSize);
+    const batchResults = await Promise.all(
+      batch.map(async (entry) => {
+        try {
+          const result = await checkIPHybrid(entry.ip, 2500);
+          return {
+            ...entry,
+            status: result.alive ? 'online' : 'offline',
+            time: result.time,
+            method: result.method
+          };
+        } catch (error) {
+          return { ...entry, status: 'timeout', time: 0, method: 'error' };
+        }
+      })
+    );
+    results.push(...batchResults);
   }
+  console.log(`✅ Verificación completa: ${results.filter(r => r.status === 'online').length}/${results.length} online`);
+  res.json(results);
 });
 
-// Ruta de prueba
-app.get('/', (req, res) => {
-  res.json({ 
-    status: 'ok',
-    platform: 'Android/Termux',
-    message: '✅ Servidor de verificación de IPs funcionando',
-    methods: [
-      '1. ICMP Ping (nativo Android)',
-      '2. TCP Socket Check (puertos: 80,443,22,8080,3389,21,23)',
-      '3. UDP Echo (puerto 53)'
-    ],
-    endpoints: [
-      'GET / - Estado del servidor',
-      'POST /api/check-ip - Verificar una IP',
-      'POST /api/check-multiple - Verificar múltiples IPs'
-    ],
-    note: 'El servidor intenta ping primero, luego TCP si falla'
-  });
-});
-
-// Health check
 app.get('/health', (req, res) => {
   res.json({ 
     status: 'healthy',
     uptime: process.uptime(),
-    memory: process.memoryUsage()
+    pingAvailable,
+    timestamp: new Date().toISOString()
+  });
+});
+
+app.get('/', (req, res) => {
+  res.json({
+    status: 'ok',
+    platform: 'Android/Termux',
+    pingAvailable,
+    message: '✅ Servidor IP Checker funcionando',
+    endpoints: ['GET /', 'GET /health', 'POST /api/check-ip', 'POST /api/check-multiple']
   });
 });
 
 const PORT = process.env.PORT || 3001;
-
 app.listen(PORT, '0.0.0.0', () => {
-  console.log('═══════════════════════════════════════════════════');
-  console.log('🚀 Servidor IP Checker para Android/Termux');
-  console.log('═══════════════════════════════════════════════════');
-  console.log(`📍 Local:    http://localhost:${PORT}`);
-  console.log(`🌐 Network:  http://[tu-ip]:${PORT}`);
-  console.log('');
-  console.log('🔧 Métodos de verificación:');
-  console.log('   1️⃣  ICMP Ping (preferido)');
-  console.log('   2️⃣  TCP Socket (fallback)');
-  console.log('   3️⃣  UDP Echo (último recurso)');
-  console.log('');
-  console.log('💡 Prueba con: curl http://localhost:' + PORT);
-  console.log('═══════════════════════════════════════════════════');
+  console.log('══════════════════════════════════');
+  console.log('🚀 IP Checker - Termux Edition');
+  console.log('══════════════════════════════════');
+  console.log(`📍 Escuchando en: http://127.0.0.1:${PORT}`);
+  console.log(`🌐 Red: http://<tu-ip-local>:${PORT}`);
+  console.log(`🔧 Ping disponible: ${pingAvailable ? 'SÍ' : 'NO'}`);
+  console.log('══════════════════════════════════');
 });
