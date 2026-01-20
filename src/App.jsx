@@ -330,7 +330,7 @@ export default function IPChecker() {
                           <span className="bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded text-xs">{entry.torre}</span>
                         </td>
                         <td className="border px-1.5 py-1">
-                          <span className="bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded text-xs">{entry.comunidad}</span>
+                          <span className="bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded text-xs">{entry.comunidad || '—'}</span>
                         </td>
                       </tr>
                     ))}
