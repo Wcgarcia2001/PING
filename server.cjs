@@ -85,7 +85,7 @@ async function checkIPHybrid(ip, timeout = 3000) {
     // Intentar ping solo si está disponible
     try {
       const timeoutSec = Math.ceil(timeout / 1000);
-      const command = `ping -c 2 -W ${timeoutSec} ${ip}`;
+      const command = `ping -c 3 -W ${timeoutSec} ${ip}`;
       const startTime = Date.now();
       const { stdout } = await new Promise((resolve, reject) => {
         exec(command, { timeout: timeout + 1000 }, (error, stdout, stderr) => {
