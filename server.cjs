@@ -155,12 +155,15 @@ app.post('/api/check-multiple', async (req, res) => {
       batch.map(async (entry) => {
         try {
           const result = await checkIPHybrid(entry.ip, 2500);
-          return {
-            ...entry,
-            status: result.alive ? 'online' : 'offline',
-            time: result.time,
-            method: result.method
-          };
+            return {
+              ip: entry.ip,
+              name: entry.name,
+              torre: entry.torre,
+              comunidad: entry.comunidad || '',   // 👈 CLAVE
+              status: result.alive ? 'online' : 'offline',
+              time: result.time,
+              method: result.method
+            };
         } catch (error) {
           return { ...entry, status: 'timeout', time: 0, method: 'error' };
         }
