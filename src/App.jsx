@@ -311,6 +311,7 @@ export default function IPChecker() {
                       <th className="border px-1.5 py-1 text-left">IP</th>
                       <th className="border px-1.5 py-1 text-left">Nombre</th>
                       <th className="border px-1.5 py-1 text-left">Torre</th>
+                      <th className="border px-1.5 py-1 text-left">Sector</th>
                     </tr>
                   </thead>
                   <tbody>
