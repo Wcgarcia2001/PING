@@ -270,7 +270,7 @@ export default function IPChecker() {
 
               <div className="mb-3 bg-gray-50 rounded border p-2">
                 <div className="flex flex-col gap-1.5">
-                  <div className="grid grid-cols-2 gap-1.5">
+                  <div className="grid grid-cols-3 gap-1.5">
                     <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className="text-xs border rounded px-1.5 py-1">
                       <option value="all">Todos</option>
                       <option value="online">Online</option>
@@ -281,6 +281,12 @@ export default function IPChecker() {
                       <option value="all">Todas las torres</option>
                       {results.torres.map((torre, idx) => (
                         <option key={idx} value={torre}>{torre}</option>
+                      ))}
+                    </select>
+                    <select value={filterComunidad} onChange={(e) => setFilterComunidad(e.target.value)} className="text-xs border rounded px-1.5 py-1">
+                      <option value="all">Todas las comunidades</option>
+                      {results.comunidades.map((comunidad, idx) => (
+                        <option key={idx} value={comunidad}>{comunidad}</option>
                       ))}
                     </select>
                   </div>
