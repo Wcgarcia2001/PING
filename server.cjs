@@ -164,11 +164,19 @@ app.post('/api/check-multiple', async (req, res) => {
               time: result.time,
               method: result.method
             };
-        } catch (error) {
-          return { ...entry, status: 'timeout', time: 0, method: 'error' };
-        }
-      })
-    );
+      } catch (error) {
+        return {
+          ip: entry.ip,
+          name: entry.name,
+          torre: entry.torre,
+          comunidad: entry.comunidad || '',   // 👈 AQUÍ ESTABA EL ERROR
+          status: 'timeout',
+          time: 0,
+          method: 'error'
+        };
+      }
+    })
+  );
     results.push(...batchResults);
   }
   console.log(`✅ Verificación completa: ${results.filter(r => r.status === 'online').length}/${results.length} online`);
