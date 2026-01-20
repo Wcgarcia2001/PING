@@ -322,6 +322,8 @@ export default function IPChecker() {
                         <td className="border px-1.5 py-1">{entry.name}</td>
                         <td className="border px-1.5 py-1">
                           <span className="bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded text-xs">{entry.torre}</span>
+                        <td className="border px-1.5 py-1">
+                          <span className="bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded text-xs">{entry.comunidad}</span>
                         </td>
                       </tr>
                     ))}
